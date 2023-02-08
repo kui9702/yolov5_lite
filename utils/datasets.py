@@ -525,11 +525,67 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __len__(self):
         return len(self.img_files)
 
-    # def __iter__(self):
-    #     self.count = -1
-    #     print('ran dataset iter')
-    #     #self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
-    #     return self
+    def __kile_argument_(self, index):
+        path = self.img_files[index]
+        img = cv2.imread(path)  # BGR
+        labels = self.labels[index].copy()
+        assert img is not None, 'Image Not Found ' + path
+        img, labels[:,1:], labels[:,:1] = alb.bBoxSafeRandomCrop(img, labels[:, 1:], labels[:, :1])
+        # alb.visualize(img, labels[:,1:], labels[:,:1], "yolo")
+        h0, w0 = img.shape[:2]
+        if kile_debug:   #kile
+            r = min(self.img_size[0]/w0, self.img_size[1]/h0)  # resize image to img_size
+            interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+            img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+        else:
+            r = self.img_size / max(h0, w0)  # resize image to img_size
+            if r != 1:  # always resize down, only resize up if training with augmentation
+                interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+                img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+        h, w = img.shape[:2]
+        # Letterbox
+        shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+        img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+        shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
+        if labels.size:  # normalized xywh to pixel xyxy format
+            labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+        return img, labels, shapes
+
+    def __kile_mosaic_(self, index):
+        indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
+        mosaic_labels = []
+        for i, index in enumerate(indices):
+            img, labels, _ = self.__kile_argument_(index)
+            if i == 0:  # top left
+                img4 = np.full((self.img_size[1] * 2, self.img_size[0] * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                img4[0:self.img_size[1], 0:self.img_size[0]] = img
+                for label in labels:
+                    mosaic_labels.append(label)
+            elif i == 1:  # top right
+                img4[0:self.img_size[1], self.img_size[0]:self.img_size[0]*2] = img
+                labels[:,1] += self.img_size[0]
+                labels[:,3] += self.img_size[0]
+                for label in labels:
+                    mosaic_labels.append(label)
+            elif i == 2:  # bottom left
+                img4[self.img_size[1]:self.img_size[1]*2, 0:self.img_size[0]] = img
+                labels[:,2] += self.img_size[1]
+                labels[:,4] += self.img_size[1]
+                for label in labels:
+                    mosaic_labels.append(label)
+            elif i == 3:  # bottom right
+                img4[self.img_size[1]:self.img_size[1]*2, self.img_size[0]:self.img_size[0]*2] = img
+                labels[:,1] += self.img_size[0]
+                labels[:,3] += self.img_size[0]
+                labels[:,2] += self.img_size[1]
+                labels[:,4] += self.img_size[1]
+                for label in labels:
+                    mosaic_labels.append(label)
+        mosaic_labels = np.array(mosaic_labels)
+        shapes = None
+        img4 = cv2.resize(img4, self.img_size)
+        mosaic_labels[:, 1:] /= 2
+        return img4, mosaic_labels, shapes
 
     def __getitem__(self, index):
         index = self.indices[index]  # linear, shuffled, or image_weights
@@ -537,16 +593,17 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         hyp = self.hyp
         mosaic = self.mosaic and random.random() < hyp['mosaic']
         if mosaic:
-            # Load mosaic
-            img, labels = load_mosaic(self, index)
-            shapes = None
+            # # Load mosaic
+            # img, labels = load_mosaic(self, index)
+            # shapes = None
 
-            # MixUp https://arxiv.org/pdf/1710.09412.pdf
-            if random.random() < hyp['mixup']:
-                img2, labels2 = load_mosaic(self, random.randint(0, self.n - 1))
-                r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
-                img = (img * r + img2 * (1 - r)).astype(np.uint8)
-                labels = np.concatenate((labels, labels2), 0)
+            # # MixUp https://arxiv.org/pdf/1710.09412.pdf
+            # if random.random() < hyp['mixup']:
+            #     img2, labels2 = load_mosaic(self, random.randint(0, self.n - 1))
+            #     r = np.random.beta(8.0, 8.0)  # mixup ratio, alpha=beta=8.0
+            #     img = (img * r + img2 * (1 - r)).astype(np.uint8)
+            #     labels = np.concatenate((labels, labels2), 0)
+            img, labels, shapes = self.__kile_mosaic_(index)
 
         else:
             if random.random() > hyp['rancrop']:
@@ -561,30 +618,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 labels = self.labels[index].copy()
                 if labels.size:  # normalized xywh to pixel xyxy format
                     labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+                
             else:
-                path = self.img_files[index]
-                img = cv2.imread(path)  # BGR
-                labels = self.labels[index].copy()
-                assert img is not None, 'Image Not Found ' + path
-                img, labels[:,1:], labels[:,:1] = alb.bBoxSafeRandomCrop(img, labels[:, 1:], labels[:, :1])
-                # alb.visualize(img, labels[:,1:], labels[:,:1], "yolo")
-                h0, w0 = img.shape[:2]
-                if kile_debug:   #kile
-                    r = min(self.img_size[0]/w0, self.img_size[1]/h0)  # resize image to img_size
-                    interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
-                    img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-                else:
-                    r = self.img_size / max(h0, w0)  # resize image to img_size
-                    if r != 1:  # always resize down, only resize up if training with augmentation
-                        interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
-                        img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
-                h, w = img.shape[:2]
-                # Letterbox
-                shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-                img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
-                shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-                if labels.size:  # normalized xywh to pixel xyxy format
-                    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+                img, labels, shapes = self.__kile_argument_(index)
         # if self.augment:
         #     # Augment imagespace
         #     if not mosaic:

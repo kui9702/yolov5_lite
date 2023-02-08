@@ -7,6 +7,8 @@ TEXT_COLOR = (255, 255, 255) # White
 
 
 def bBoxSafeRandomCrop(image, bboxes, category_ids, p=1):
+    if len(category_ids.shape) != 1:
+        category_ids = category_ids.reshape(-1)
     transform = A.Compose(
         [A.BBoxSafeRandomCrop(p=p)],
         bbox_params=A.BboxParams(format='yolo', label_fields=['category_ids']),
@@ -17,6 +19,7 @@ def bBoxSafeRandomCrop(image, bboxes, category_ids, p=1):
     except:
         # print("dasdadsadasdasdadada\n")
         return image, bboxes, category_ids
+        
 def visualize_bbox(img, bbox, class_name, color=BOX_COLOR, thickness=2, type="yolo", xyxy="xyxy"):
     """Visualizes a single bounding box on the image"""
     x_min, y_min, w, h = bbox
