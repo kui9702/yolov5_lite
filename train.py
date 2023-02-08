@@ -328,7 +328,7 @@ def train(hyp, opt, device, tb_writer=None):
                 pbar.set_description(s)
 
                 # Plot
-                if plots and ni < 3:
+                if plots and ni < 9:
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
                     Thread(target=plot_images, args=(imgs, targets, paths, f), daemon=True).start()
                     # if tb_writer:
@@ -456,10 +456,10 @@ def train(hyp, opt, device, tb_writer=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='/mnt/code/python/code/202301/YOLOv5-Lite/weights/v5lite-e.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='/mnt/code/python/code/202301/YOLOv5-Lite/models/v5Lite-e.yaml', help='model.yaml path')
-    parser.add_argument('--data', type=str, default='/mnt/code/python/code/202301/YOLOv5-Lite/data/plate.yaml', help='data.yaml path')
-    parser.add_argument('--hyp', type=str, default='/mnt/code/python/code/202301/YOLOv5-Lite/data/hyp.scratch.yaml', help='hyperparameters path')
+    parser.add_argument('--weights', type=str, default='/mnt/code/python/code/202301/yolov5_lite/weights/v5lite-e.pt', help='initial weights path')
+    parser.add_argument('--cfg', type=str, default='/mnt/code/python/code/202301/yolov5_lite/models/v5Lite-e.yaml', help='model.yaml path')
+    parser.add_argument('--data', type=str, default='/mnt/code/python/code/202301/yolov5_lite/data/plate.yaml', help='data.yaml path')
+    parser.add_argument('--hyp', type=str, default='/mnt/code/python/code/202301/yolov5_lite/data/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=128, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')

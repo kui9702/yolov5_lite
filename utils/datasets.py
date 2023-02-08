@@ -11,7 +11,7 @@ from itertools import repeat
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from threading import Thread
-
+from kile_utils import alb
 import cv2
 import numpy as np
 import torch
@@ -549,33 +549,58 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 labels = np.concatenate((labels, labels2), 0)
 
         else:
-            # Load image
-            img, (h0, w0), (h, w) = load_image(self, index)
+            if random.random() > hyp['rancrop']:
+                # Load image
+                img, (h0, w0), (h, w) = load_image(self, index)
 
-            # Letterbox
-            shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
-            img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
-            shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
-            
-            labels = self.labels[index].copy()
-            if labels.size:  # normalized xywh to pixel xyxy format
-                labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-        if self.augment:
-            # Augment imagespace
-            if not mosaic:
-                img, labels = random_perspective(img, labels,
-                                                 degrees=hyp['degrees'],
-                                                 translate=hyp['translate'],
-                                                 scale=hyp['scale'],
-                                                 shear=hyp['shear'],
-                                                 perspective=hyp['perspective'])
+                # Letterbox
+                shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+                img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+                shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
+                
+                labels = self.labels[index].copy()
+                if labels.size:  # normalized xywh to pixel xyxy format
+                    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+            else:
+                path = self.img_files[index]
+                img = cv2.imread(path)  # BGR
+                labels = self.labels[index].copy()
+                assert img is not None, 'Image Not Found ' + path
+                img, labels[:,1:], labels[:,:1] = alb.bBoxSafeRandomCrop(img, labels[:, 1:], labels[:, :1])
+                # alb.visualize(img, labels[:,1:], labels[:,:1], "yolo")
+                h0, w0 = img.shape[:2]
+                if kile_debug:   #kile
+                    r = min(self.img_size[0]/w0, self.img_size[1]/h0)  # resize image to img_size
+                    interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+                    img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+                else:
+                    r = self.img_size / max(h0, w0)  # resize image to img_size
+                    if r != 1:  # always resize down, only resize up if training with augmentation
+                        interp = cv2.INTER_AREA if r < 1 and not self.augment else cv2.INTER_LINEAR
+                        img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
+                h, w = img.shape[:2]
+                # Letterbox
+                shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
+                img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+                shapes = (h0, w0), ((h / h0, w / w0), pad)  # for COCO mAP rescaling
+                if labels.size:  # normalized xywh to pixel xyxy format
+                    labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
+        # if self.augment:
+        #     # Augment imagespace
+        #     if not mosaic:
+        #         img, labels = random_perspective(img, labels,
+        #                                          degrees=hyp['degrees'],
+        #                                          translate=hyp['translate'],
+        #                                          scale=hyp['scale'],
+        #                                          shear=hyp['shear'],
+        #                                          perspective=hyp['perspective'])
 
-            # Augment colorspace
-            augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
+        #     # Augment colorspace
+        #     augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
-            # Apply cutouts
-            # if random.random() < 0.9:
-            #     labels = cutout(img, labels)
+        #     # Apply cutouts
+        #     # if random.random() < 0.9:
+        #     #     labels = cutout(img, labels)
 
         nL = len(labels)  # number of labels
         if nL:
@@ -583,18 +608,18 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             labels[:, [2, 4]] /= img.shape[0]  # normalized height 0-1
             labels[:, [1, 3]] /= img.shape[1]  # normalized width 0-1
 
-        if self.augment:
-            # flip up-down
-            if random.random() < hyp['flipud']:
-                img = np.flipud(img)
-                if nL:
-                    labels[:, 2] = 1 - labels[:, 2]
+        # if self.augment:
+        #     # flip up-down
+        #     if random.random() < hyp['flipud']:
+        #         img = np.flipud(img)
+        #         if nL:
+        #             labels[:, 2] = 1 - labels[:, 2]
 
-            # flip left-right
-            if random.random() < hyp['fliplr']:
-                img = np.fliplr(img)
-                if nL:
-                    labels[:, 1] = 1 - labels[:, 1]
+        #     # flip left-right
+        #     if random.random() < hyp['fliplr']:
+        #         img = np.fliplr(img)
+        #         if nL:
+        #             labels[:, 1] = 1 - labels[:, 1]
 
         labels_out = torch.zeros((nL, 6))
         if nL:
